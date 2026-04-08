@@ -15,8 +15,9 @@ const WebSocket = require('ws');
 const { setupWSConnection } = require('y-websocket/bin/utils');
 require('dotenv').config();
 
-const PORT = process.env.WS_PORT || 1234;
-const HOST = process.env.WS_HOST || '0.0.0.0';
+
+const HOST = process.env.HOST || '0.0.0.0';
+const PORT = process.env.PORT || 1234;
 
 // Create a plain HTTP server (required by ws)
 const server = http.createServer((req, res) => {
