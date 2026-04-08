@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3001;
 
 
 app.use(cors({
-  origin: process.env.CLIENT_ORIGIN || '*',
+  origin:'https://collabdocs-z51m.onrender.com',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true,
 }));
