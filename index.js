@@ -49,7 +49,7 @@ app.post('/api/export/pdf', async (req, res) => {
       headless: true,
       args: ['--no-sandbox', '--disable-setuid-sandbox'] // needed for deployment environments like Render
     });
-    
+
     // Create full HTML document to render
     const fullHTML = `
       <!DOCTYPE html>
@@ -74,7 +74,7 @@ app.post('/api/export/pdf', async (req, res) => {
 
     const page = await browser.newPage();
     await page.setContent(fullHTML, { waitUntil: 'domcontentloaded' });
-    
+
     const pdfBuffer = await page.pdf({
       format: 'A4',
       margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' },
@@ -84,7 +84,7 @@ app.post('/api/export/pdf', async (req, res) => {
     res.contentType('application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="${title || 'Export'}.pdf"`);
     res.send(pdfBuffer);
-    
+
   } catch (error) {
     console.error('PDF generation error:', error);
     res.status(500).json({ error: 'Failed to generate PDF' });
@@ -136,7 +136,7 @@ app.get('/api/rooms/:roomId', (req, res) => {
 
 /** AI Content Assistant (In-Editor) */
 app.post('/api/ai/assist', async (req, res) => {
-  const { prompt, context } = req.body;
+  const { prompt, context, mode = 'doc' } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
@@ -149,33 +149,58 @@ app.post('/api/ai/assist', async (req, res) => {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    // const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
-     const model = genAI.getGenerativeModel({ 
-      model: "gemini-3-flash-preview" 
-    });
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
 
-    const systemPrompt = `
-      You are an expert Writing Assistant integrated into a collaborative document editor called CollabDocs.
-      
-      CONTEXT OF CURRENT DOCUMENT:
-      ${context || 'No content yet.'}
+    let systemPrompt = '';
 
-      USER REQUEST:
-      ${prompt}
+    if (mode === 'code') {
+      systemPrompt = `
+        You are an elite Senior Software Engineer. You provide beautifully formatted technical reports in Markdown.
+        
+        CONTEXT OF CURRENT CODE:
+        ${context || '// No code yet.'}
 
-      INSTRUCTIONS:
-      1. If the user asks to "continue" or "write", provide a few paragraphs of high-quality content.
-      2. If the user asks to "refine" or "fix", provide the corrected version.
-      3. OUTPUT: Return ONLY the HTML content. No Markdown, no title tags. 
-      4. Use semantic HTML (p, strong, ul, li).
-    `;
+        USER TASK:
+        ${prompt}
+        
+        STRUCTURE:
+        1. ### 💻 Proposed Fix
+           Provide the corrected code in a \`\`\`language block.
+        2. ### 🔍 Diagnostic Report
+           What was wrong.
+        3. ### ✨ Improvements Made
+           How it's better.
+        
+        CRITICAL: Use clean Markdown. Use bullet points and headers.
+      `;
+    } else {
+      systemPrompt = `
+        You are an expert Writing Assistant integrated into a collaborative document editor called CollabDocs.
+        
+        CONTEXT OF CURRENT DOCUMENT:
+        ${context || 'No content yet.'}
+
+        USER REQUEST:
+        ${prompt}
+
+        INSTRUCTIONS:
+        1. If the user asks to "continue" or "write", provide a few paragraphs of high-quality content.
+        2. If the user asks to "refine" or "fix", provide the corrected version.
+        3. OUTPUT: Return ONLY the HTML content. No Markdown, no title tags. 
+        4. Use semantic HTML (p, strong, ul, li).
+      `;
+    }
 
     const result = await model.generateContent(systemPrompt);
     const response = await result.response;
-    let html = response.text().trim();
-    html = html.replace(/^```html\n?/, '').replace(/\n?```$/, '');
-    
-    res.json({ html });
+    let text = response.text().trim();
+
+    // Cleanup for documentation mode (Legacy)
+    if (mode === 'doc') {
+      text = text.replace(/^```html\n?/, '').replace(/\n?```$/, '');
+    }
+
+    res.json({ html: text });
   } catch (error) {
     console.error('AI Assist Error:', error);
     // Return specific error message if available (e.g., 503 Service Unavailable)
