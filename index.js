@@ -4,14 +4,29 @@
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3001;
 
 
+const allowedOrigins = [
+  'https://collabdocs-z51m.onrender.com',
+  'http://localhost:5173',
+  'http://localhost:3000'
+];
+
 app.use(cors({
-  origin:'https://collabdocs-z51m.onrender.com',
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true,
 }));
@@ -118,8 +133,118 @@ app.get('/api/rooms/:roomId', (req, res) => {
   res.json({ room });
 });
 
+// ---- AI Template Generation ----
+
+app.post('/api/ai/generate-blueprint', async (req, res) => {
+  const { prompt } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
+    return res.status(400).json({ 
+      error: 'Gemini API key is missing or invalid in server/index.js .env file.' 
+    });
+  }
+
+  if (!prompt) {
+    return res.status(400).json({ error: 'Prompt is required' });
+  }
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+    const systemPrompt = `
+      You are an expert Technical Architect and Product Manager.
+      User Goal: ${prompt}
+
+      TASK: Generate a high-fidelity, collaborative document structure in clean HTML5.
+      
+      REQUIREMENTS:
+      1. TONE: Professional, structured, and action-oriented.
+      2. FORMAT: 
+         - Use <h1> for the main title.
+         - Use <h2> for major sections (e.g., Objective, Roadmap, Technical Stack).
+         - Use <blockquote> for high-level summaries or abstracts.
+         - Use <ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Action Item</p></li></ul> for checklists.
+         - Use <table> with <thead> for data, timelines, or status tracking.
+      3. OUTPUT: Return ONLY the HTML body content. No Markdown, no <html>/<body> tags.
+
+      Focus on the specific context of "${prompt}". If it's a meeting, include agendas and attendees. If it's technical, include architecture and code blocks.
+    `;
+
+    try {
+      const result = await model.generateContent(systemPrompt);
+      const response = await result.response;
+      let html = response.text().trim();
+      html = html.replace(/^```html\n?/, '').replace(/\n?```$/, '');
+      const titleMatch = html.match(/<h1>(.*?)<\/h1>/);
+      const title = titleMatch ? titleMatch[1] : `AI: ${prompt}`;
+      res.json({ title, html });
+    } catch (aiErr) {
+      console.warn('AI Quota hit, using Smart Fallback for:', prompt);
+      
+      // SMART FALLBACK LOGIC
+      const p = prompt.toLowerCase();
+      let fallbackHtml = '';
+      let fallbackTitle = `Blueprint: ${prompt}`;
+
+      if (p.includes('meeting') || p.includes('notes') || p.includes('call')) {
+        fallbackHtml = `
+          <h1>Meeting Notes: ${prompt}</h1>
+          <p> <em>[Drafted via Smart Fallback]</em></p>
+          <blockquote><strong>Facilitator:</strong> [Name] | <strong>Date:</strong> ${new Date().toLocaleDateString()}</blockquote>
+          <h2>Agenda Items</h2><ul><li>Item 1</li><li>Item 2</li></ul>
+          <hr />
+          <h2>Decision Log</h2><p>Notes on key decisions made during the session...</p>
+          <h2>Action Items</h2>
+          <ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Review decisions with team</p></li><li data-type="taskItem" data-checked="false"><p>Update stakeholders</p></li></ul>
+        `;
+      } else if (p.includes('api') || p.includes('doc') || p.includes('technical')) {
+        fallbackHtml = `
+          <h1>Technical Design: ${prompt}</h1>
+          <p> <em>[Drafted via Smart Fallback]</em></p>
+          <blockquote>Overview of the technical approach, architecture, and system design.</blockquote>
+          <h2>Architecture</h2><pre><code>[Client] <-> [API Gateway] <-> [Service] <-> [DB]</code></pre>
+          <h2>API Specification</h2>
+          <table><thead><tr><th>Endpoint</th><th>Method</th><th>Description</th></tr></thead><tbody><tr><td>/api/v1/health</td><td>GET</td><td>Check service status</td></tr></tbody></table>
+        `;
+      } else if (p.includes('school') || p.includes('instruction') || p.includes('curriculum') || p.includes('lesson')) {
+        fallbackHtml = `
+          <h1>Instructional Plan: ${prompt}</h1>
+          <p> <em>[Drafted via Smart Fallback]</em></p>
+          <blockquote><strong>Subject:</strong> ${prompt} | <strong>Target Audience:</strong> Students/Trainees</blockquote>
+          <h2>Module 1: Introduction & Fundamentals</h2>
+          <ul><li>Learning Objectives</li><li>Key Terminology</li><li>Initial Assessment</li></ul>
+          <h2>Module 2: Core Skills Development</h2>
+          <p>Walkthrough of the practical steps and techniques required...</p>
+          <h2>Student Milestones</h2>
+          <ul data-type="taskList">
+            <li data-type="taskItem" data-checked="false"><p>Complete theory session</p></li>
+            <li data-type="taskItem" data-checked="false"><p>Pass practical evaluation</p></li>
+          </ul>
+        `;
+      } else {
+        fallbackHtml = `
+          <h1>Project Blueprint: ${prompt}</h1>
+          <p> <em>[Drafted via Smart Fallback]</em></p>
+          <blockquote>Objective: To define and execute the successful delivery of ${prompt}.</blockquote>
+          <h2>Project Goals</h2><ul><li>Primary Objective</li><li>Success Metric</li></ul>
+          <h2>Roadmap</h2>
+          <table><thead><tr><th>Phase</th><th>Deliverable</th><th>Status</th></tr></thead><tbody><tr><td>Q1</td><td>Foundation & Setup</td><td>Planned</td></tr></tbody></table>
+          <h2>Immediate Tasks</h2>
+          <ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Establish project team</p></li></ul>
+        `;
+      }
+      res.json({ title: fallbackTitle, html: fallbackHtml });
+    }
+  } catch (error) {
+    console.error('AI Service Error:', error);
+    res.status(500).json({ error: 'Failed to initialize AI service' });
+  }
+});
+
 // ---- Start Server ----
 app.listen(PORT, () => {
-  console.log(` Express API server running on http://localhost:${PORT}`);
-  console.log(`   Health check: http://localhost:${PORT}/api/health`);
+  console.log(` Express API server running Production`);
+  console.log(`   Health check: https://collabserver.onrender.com/api/health`);
 });
