@@ -67,7 +67,6 @@ app.post('/api/export/pdf', async (req, res) => {
         </style>
       </head>
       <body>
-        ${title ? `<h1 style="text-align: center; border-bottom: 1px solid #ccc; padding-bottom: 10px;">${title}</h1>` : ''}
         ${html}
       </body>
       </html>
@@ -133,16 +132,15 @@ app.get('/api/rooms/:roomId', (req, res) => {
   res.json({ room });
 });
 
-// ---- AI Template Generation ----
+// ---- AI Interaction ----
 
-app.post('/api/ai/generate-blueprint', async (req, res) => {
-  const { prompt } = req.body;
+/** AI Content Assistant (In-Editor) */
+app.post('/api/ai/assist', async (req, res) => {
+  const { prompt, context } = req.body;
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey || apiKey === 'YOUR_GEMINI_API_KEY') {
-    return res.status(400).json({ 
-      error: 'Gemini API key is missing or invalid in server/index.js .env file.' 
-    });
+    return res.status(400).json({ error: 'Gemini API key is missing.' });
   }
 
   if (!prompt) {
@@ -151,97 +149,41 @@ app.post('/api/ai/generate-blueprint', async (req, res) => {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    // const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+     const model = genAI.getGenerativeModel({ 
+      model: "gemini-3-flash-preview" 
+    });
 
     const systemPrompt = `
-      You are an expert Technical Architect and Product Manager.
-      User Goal: ${prompt}
-
-      TASK: Generate a high-fidelity, collaborative document structure in clean HTML5.
+      You are an expert Writing Assistant integrated into a collaborative document editor called CollabDocs.
       
-      REQUIREMENTS:
-      1. TONE: Professional, structured, and action-oriented.
-      2. FORMAT: 
-         - Use <h1> for the main title.
-         - Use <h2> for major sections (e.g., Objective, Roadmap, Technical Stack).
-         - Use <blockquote> for high-level summaries or abstracts.
-         - Use <ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Action Item</p></li></ul> for checklists.
-         - Use <table> with <thead> for data, timelines, or status tracking.
-      3. OUTPUT: Return ONLY the HTML body content. No Markdown, no <html>/<body> tags.
+      CONTEXT OF CURRENT DOCUMENT:
+      ${context || 'No content yet.'}
 
-      Focus on the specific context of "${prompt}". If it's a meeting, include agendas and attendees. If it's technical, include architecture and code blocks.
+      USER REQUEST:
+      ${prompt}
+
+      INSTRUCTIONS:
+      1. If the user asks to "continue" or "write", provide a few paragraphs of high-quality content.
+      2. If the user asks to "refine" or "fix", provide the corrected version.
+      3. OUTPUT: Return ONLY the HTML content. No Markdown, no title tags. 
+      4. Use semantic HTML (p, strong, ul, li).
     `;
 
-    try {
-      const result = await model.generateContent(systemPrompt);
-      const response = await result.response;
-      let html = response.text().trim();
-      html = html.replace(/^```html\n?/, '').replace(/\n?```$/, '');
-      const titleMatch = html.match(/<h1>(.*?)<\/h1>/);
-      const title = titleMatch ? titleMatch[1] : `AI: ${prompt}`;
-      res.json({ title, html });
-    } catch (aiErr) {
-      console.warn('AI Quota hit, using Smart Fallback for:', prompt);
-      
-      // SMART FALLBACK LOGIC
-      const p = prompt.toLowerCase();
-      let fallbackHtml = '';
-      let fallbackTitle = `Blueprint: ${prompt}`;
-
-      if (p.includes('meeting') || p.includes('notes') || p.includes('call')) {
-        fallbackHtml = `
-          <h1>Meeting Notes: ${prompt}</h1>
-          <p> <em>[Drafted via Smart Fallback]</em></p>
-          <blockquote><strong>Facilitator:</strong> [Name] | <strong>Date:</strong> ${new Date().toLocaleDateString()}</blockquote>
-          <h2>Agenda Items</h2><ul><li>Item 1</li><li>Item 2</li></ul>
-          <hr />
-          <h2>Decision Log</h2><p>Notes on key decisions made during the session...</p>
-          <h2>Action Items</h2>
-          <ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Review decisions with team</p></li><li data-type="taskItem" data-checked="false"><p>Update stakeholders</p></li></ul>
-        `;
-      } else if (p.includes('api') || p.includes('doc') || p.includes('technical')) {
-        fallbackHtml = `
-          <h1>Technical Design: ${prompt}</h1>
-          <p> <em>[Drafted via Smart Fallback]</em></p>
-          <blockquote>Overview of the technical approach, architecture, and system design.</blockquote>
-          <h2>Architecture</h2><pre><code>[Client] <-> [API Gateway] <-> [Service] <-> [DB]</code></pre>
-          <h2>API Specification</h2>
-          <table><thead><tr><th>Endpoint</th><th>Method</th><th>Description</th></tr></thead><tbody><tr><td>/api/v1/health</td><td>GET</td><td>Check service status</td></tr></tbody></table>
-        `;
-      } else if (p.includes('school') || p.includes('instruction') || p.includes('curriculum') || p.includes('lesson')) {
-        fallbackHtml = `
-          <h1>Instructional Plan: ${prompt}</h1>
-          <p> <em>[Drafted via Smart Fallback]</em></p>
-          <blockquote><strong>Subject:</strong> ${prompt} | <strong>Target Audience:</strong> Students/Trainees</blockquote>
-          <h2>Module 1: Introduction & Fundamentals</h2>
-          <ul><li>Learning Objectives</li><li>Key Terminology</li><li>Initial Assessment</li></ul>
-          <h2>Module 2: Core Skills Development</h2>
-          <p>Walkthrough of the practical steps and techniques required...</p>
-          <h2>Student Milestones</h2>
-          <ul data-type="taskList">
-            <li data-type="taskItem" data-checked="false"><p>Complete theory session</p></li>
-            <li data-type="taskItem" data-checked="false"><p>Pass practical evaluation</p></li>
-          </ul>
-        `;
-      } else {
-        fallbackHtml = `
-          <h1>Project Blueprint: ${prompt}</h1>
-          <p> <em>[Drafted via Smart Fallback]</em></p>
-          <blockquote>Objective: To define and execute the successful delivery of ${prompt}.</blockquote>
-          <h2>Project Goals</h2><ul><li>Primary Objective</li><li>Success Metric</li></ul>
-          <h2>Roadmap</h2>
-          <table><thead><tr><th>Phase</th><th>Deliverable</th><th>Status</th></tr></thead><tbody><tr><td>Q1</td><td>Foundation & Setup</td><td>Planned</td></tr></tbody></table>
-          <h2>Immediate Tasks</h2>
-          <ul data-type="taskList"><li data-type="taskItem" data-checked="false"><p>Establish project team</p></li></ul>
-        `;
-      }
-      res.json({ title: fallbackTitle, html: fallbackHtml });
-    }
+    const result = await model.generateContent(systemPrompt);
+    const response = await result.response;
+    let html = response.text().trim();
+    html = html.replace(/^```html\n?/, '').replace(/\n?```$/, '');
+    
+    res.json({ html });
   } catch (error) {
-    console.error('AI Service Error:', error);
-    res.status(500).json({ error: 'Failed to initialize AI service' });
+    console.error('AI Assist Error:', error);
+    // Return specific error message if available (e.g., 503 Service Unavailable)
+    const errorMessage = error.message || 'AI Assistant failed';
+    res.status(500).json({ error: errorMessage });
   }
 });
+;
 
 // ---- Start Server ----
 app.listen(PORT, () => {
