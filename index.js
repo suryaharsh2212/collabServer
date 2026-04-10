@@ -4,8 +4,23 @@
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
+const nodemailer = require('nodemailer');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+
 require('dotenv').config();
+
+process.on('uncaughtException', (err) => {
+  console.error('UNCAUGHT EXCEPTION!  Shutting down...');
+  console.error(err.name, err.message);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('UNHANDLED REJECTION!  Shutting down...');
+  console.error(err.name, err.message);
+  process.exit(1);
+});
+
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -131,6 +146,186 @@ app.post('/api/export/pdf', async (req, res) => {
     }
   }
 });
+
+// ---- Email Invitation System ----
+
+const transporter = nodemailer.createTransport({
+  host: 'smtp.zoho.in',
+  port: 465,
+  secure: true,
+  auth: {
+    user: process.env.ZOHO_USER,
+    pass: process.env.ZOHO_PASS,
+  },
+});
+
+// Verify connection configuration on startup
+transporter.verify(function (error, success) {
+  if (error) {
+    console.error('SMTP Connection Error:', error);
+  } else {
+    console.log('Server is ready to send invitations');
+  }
+});
+
+
+app.post('/api/invite', async (req, res) => {
+  const { email, inviteLink, docTitle, isCode, senderName } = req.body;
+
+
+  if (!email || !inviteLink) {
+    return res.status(400).json({ error: 'Email and invite link are required' });
+  }
+
+  const mailOptions = {
+    from: `"CollabDocs" <${process.env.ZOHO_USER}>`,
+    to: email,
+    subject: `${senderName || 'A colleague'} invited you to ${isCode ? 'code' : 'collaborate'}: ${docTitle || 'Untitled Session'}`,
+    text: `Hello! ${senderName || 'A colleague'} has invited you to ${isCode ? 'code live' : 'collaborate'} on "${docTitle || 'Untitled Session'}" at CollabDocs. Use this link to join the session: ${inviteLink}`,
+    html: isCode ? `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CollabDocs Code Invitation</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #0f172a; font-family: 'JetBrains Mono', 'Fira Code', monospace; -webkit-font-smoothing: antialiased;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+          <tr>
+            <td align="center" style="padding: 40px 0;">
+              <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #1e293b; border-radius: 12px; overflow: hidden; box-shadow: 0 10px 25px rgba(0,0,0,0.3); border: 1px solid #334155;">
+                <!-- Header -->
+                <tr>
+                  <td align="center" style="padding: 40px; background-color: #0f172a;">
+                    <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); width: 56px; height: 56px; border-radius: 16px; display: inline-block; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
+                      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="padding: 14px; box-sizing: border-box;">
+                        <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+                      </svg>
+                    </div>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -1px; font-family: sans-serif;">CollabDocs // Code</h1>
+                  </td>
+                </tr>
+                <!-- Body -->
+                <tr>
+                  <td style="padding: 40px 50px;">
+                    <p style="color: #10b981; font-weight: 700; font-size: 14px; margin: 0 0 10px 0; text-transform: uppercase; letter-spacing: 2px;">Incoming Session Invite</p>
+                    <h2 style="color: #ffffff; margin: 0 0 20px 0; font-size: 20px; font-weight: 600; font-family: sans-serif;">${senderName || 'A colleague'} wants to code with you.</h2>
+                    <p style="color: #94a3b8; line-height: 1.6; font-size: 15px; margin-bottom: 30px;">
+                      You have been invited to a live pair-programming session. Connect now to sync your workspace and collaborate on code in real-time.
+                    </p>
+                    
+                    <div style="background-color: #0f172a; border-left: 4px solid #10b981; padding: 20px; margin-bottom: 35px; border-radius: 0 8px 8px 0;">
+                      <p style="margin: 0; font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 700; letter-spacing: 1px;">Project Identifier</p>
+                      <p style="margin: 8px 0 0 0; font-size: 17px; color: #10b981; font-weight: 700; font-family: monospace;">> ${docTitle || 'Untitled Snippet'}</p>
+                    </div>
+                    
+                    <div style="text-align: center;">
+                      <a href="${inviteLink}" style="background-color: #10b981; color: #ffffff; padding: 18px 35px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 15px; display: inline-block; font-family: sans-serif; box-shadow: 0 4px 15px rgba(16, 185, 129, 0.25);">Connect to Session</a>
+                    </div>
+                  </td>
+                </tr>
+                <!-- Footer -->
+                <tr>
+                  <td style="padding: 30px 50px; background-color: #0f172a; border-top: 1px solid #334155; text-align: center;">
+                    <p style="color: #475569; font-size: 11px; margin: 0; font-family: monospace;">
+                      STATUS: ENCRYPTED // PORT: 443 <br>
+                      &copy; 2024 CollabDocs // The Developer Workspace.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    ` : `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CollabDocs Invitation</title>
+      </head>
+      <body style="margin: 0; padding: 0; background-color: #f6f9fc; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="table-layout: fixed;">
+          <tr>
+            <td align="center" style="padding: 40px 0;">
+              <table border="0" cellpadding="0" cellspacing="0" width="600" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); border: 1px solid #e1e8ed;">
+                <!-- Header -->
+                <tr>
+                  <td align="center" style="padding: 40px 40px 20px 40px; background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%);">
+                    <div style="background: rgba(255,255,255,0.2); width: 48px; height: 48px; border-radius: 12px; display: inline-block; margin-bottom: 15px;">
+                      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="padding: 10px; box-sizing: border-box;">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+                      </svg>
+                    </div>
+                    <h1 style="color: #ffffff; margin: 0; font-size: 28px; font-weight: 800; letter-spacing: -0.5px;">CollabDocs</h1>
+                    <p style="color: rgba(255,255,255,0.8); margin-top: 10px; font-size: 14px; font-weight: 500;">Premium Real-Time Collaboration</p>
+                  </td>
+                </tr>
+                <!-- Body -->
+                <tr>
+                  <td style="padding: 40px 50px;">
+                    <h2 style="color: #1a1a1a; margin: 0 0 20px 0; font-size: 22px; font-weight: 700;">You're Invited!</h2>
+                    <p style="color: #4b5563; line-height: 1.6; font-size: 16px; margin-bottom: 30px;">
+                      Hello,<br><br>
+                      <strong>${senderName || 'A colleague'}</strong> has invited you to collaborate on a session at CollabDocs. You can now view and edit the document in real-time with other contributors.
+                    </p>
+                    
+                    <div style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px; margin-bottom: 35px;">
+                      <p style="margin: 0; font-size: 12px; color: #9ca3af; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Session Title</p>
+                      <p style="margin: 5px 0 0 0; font-size: 18px; color: #111827; font-weight: 700;">${docTitle || 'Untitled Session'}</p>
+                    </div>
+                    
+                    <div style="text-align: center;">
+                      <a href="${inviteLink}" style="background-color: #6366f1; color: #ffffff; padding: 16px 32px; border-radius: 12px; text-decoration: none; font-weight: 700; font-size: 16px; display: inline-block; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);">Join Collaboration Room</a>
+                    </div>
+                    
+                    <p style="color: #9ca3af; font-size: 13px; line-height: 1.6; margin-top: 40px; text-align: center;">
+                      If you're having trouble clicking the button, copy and paste the URL below into your web browser:<br>
+                      <a href="${inviteLink}" style="color: #6366f1; word-break: break-all;">${inviteLink}</a>
+                    </p>
+                  </td>
+                </tr>
+                <!-- Footer -->
+                <tr>
+                  <td style="padding: 30px 50px; background-color: #f8fafc; border-top: 1px solid #e1e8ed; text-align: center;">
+                    <p style="color: #94a3b8; font-size: 12px; margin: 0;">
+                      &copy; 2024 CollabDocs Engineering Team. <br>
+                      Built for developers and writers who value real-time precision.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              <table border="0" cellpadding="0" cellspacing="0" width="600">
+                <tr>
+                   <td align="center" style="padding: 20px 0; color: #cbd5e1; font-size: 11px;">
+                      Sent via CollabDocs Automated Invitation System
+                   </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+      </html>
+    `,
+  };
+
+
+
+
+  try {
+    await transporter.sendMail(mailOptions);
+    res.json({ success: true, message: 'Invitation sent successfully' });
+  } catch (error) {
+    console.error('Email send error:', error);
+    res.status(500).json({ error: 'Failed to send invitation. Please check configuration.' });
+  }
+});
+
 
 // ---- Metadata Routes ----
 
