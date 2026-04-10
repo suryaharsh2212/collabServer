@@ -38,7 +38,7 @@ const rooms = new Map();
 
 /** Generate PDF via Puppeteer */
 app.post('/api/export/pdf', async (req, res) => {
-  const { html, title } = req.body;
+  const { html, title, margins, indentation } = req.body;
   if (!html) {
     return res.status(400).json({ error: 'HTML content is required' });
   }
@@ -47,7 +47,7 @@ app.post('/api/export/pdf', async (req, res) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] // needed for deployment environments like Render
+      args: ['--no-sandbox', '--disable-setuid-sandbox'] 
     });
 
     // Create full HTML document to render
@@ -58,12 +58,41 @@ app.post('/api/export/pdf', async (req, res) => {
         <meta charset="UTF-8">
         <title>${title || 'CollabDocs Export'}</title>
         <style>
-          body { font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; line-height: 1.6; color: #1a1a1a; }
-          pre { background: #f5f5f5; padding: 1rem; border-radius: 8px; overflow-x: auto; font-family: monospace; }
-          code { background: #f0f0f0; padding: 0.15rem 0.3rem; border-radius: 3px; font-family: monospace; }
-          blockquote { border-left: 3px solid #6366f1; padding-left: 1rem; color: #666; font-style: italic; }
-          h1, h2, h3 { margin-top: 1.5rem; margin-bottom: 0.5rem; }
-          img { max-width: 100%; height: auto; }
+          body { font-family: 'Inter', system-ui, -apple-system, sans-serif; max-width: 800px; margin: 0 auto; padding: 0; line-height: 1.6; color: #1a1a1a; }
+          
+          /* Typography */
+          h1 { font-size: 2.5rem; margin-bottom: 1rem; color: #111; text-align: center; }
+          h2 { font-size: 1.8rem; margin-top: 2rem; margin-bottom: 0.8rem; color: #333; }
+          h3 { font-size: 1.4rem; margin-top: 1.5rem; margin-bottom: 0.6rem; color: #444; }
+          p { margin-bottom: 1rem; text-indent: ${indentation || 0}mm; }
+          
+          /* Tables */
+          table { width: 100%; border-collapse: collapse; margin-top: 1.5rem; margin-bottom: 1.5rem; table-layout: auto; }
+          th, td { border: 1px solid #ddd; padding: 12px 15px; text-align: left; }
+          th { background-color: #f8f9fa; font-weight: bold; color: #333; }
+          tr:nth-child(even) { background-color: #fafafa; }
+          
+          /* Blocks */
+          pre { background: #f5f5f5; padding: 1.5rem; border-radius: 8px; overflow-x: auto; font-family: 'JetBrains Mono', monospace; border: 1px solid #e0e0e0; margin-bottom: 1.5rem; }
+          code { background: #f0f0f0; padding: 0.2rem 0.4rem; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+          blockquote { border-left: 4px solid #6366f1; padding: 1rem 1.5rem; background: #f9f9ff; color: #444; font-style: italic; border-radius: 0 8px 8px 0; margin-bottom: 1.5rem; margin-left: 0; }
+          
+          /* Images & Media */
+          img { max-width: 100%; height: auto; border-radius: 8px; display: block; margin: 1.5rem 0; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+          
+          /* Alignment Helpers */
+          [style*="text-align: center"] { text-align: center; }
+          [style*="text-align: center"] img, 
+          [style*="text-align: center"] table { margin-left: auto !important; margin-right: auto !important; }
+          
+          [style*="text-align: right"] { text-align: right; }
+          [style*="text-align: right"] img, 
+          [style*="text-align: right"] table { margin-left: auto !important; margin-right: 0 !important; }
+          
+          /* Task Lists */
+          ul[data-type="taskList"] { list-style: none; padding-left: 0; }
+          ul[data-type="taskList"] li { display: flex; align-items: flex-start; margin-bottom: 0.5rem; }
+          ul[data-type="taskList"] input[type="checkbox"] { margin-right: 10px; margin-top: 5px; }
         </style>
       </head>
       <body>
@@ -75,9 +104,17 @@ app.post('/api/export/pdf', async (req, res) => {
     const page = await browser.newPage();
     await page.setContent(fullHTML, { waitUntil: 'domcontentloaded' });
 
+    // Format margins to include 'mm' if they are numbers
+    const finalMargins = margins ? {
+      top: `${margins.top}mm`,
+      right: `${margins.right}mm`,
+      bottom: `${margins.bottom}mm`,
+      left: `${margins.left}mm`
+    } : { top: '15mm', right: '15mm', bottom: '15mm', left: '15mm' };
+
     const pdfBuffer = await page.pdf({
       format: 'A4',
-      margin: { top: '20mm', right: '20mm', bottom: '20mm', left: '20mm' },
+      margin: finalMargins,
       printBackground: true
     });
 
@@ -206,6 +243,49 @@ app.post('/api/ai/assist', async (req, res) => {
     // Return specific error message if available (e.g., 503 Service Unavailable)
     const errorMessage = error.message || 'AI Assistant failed';
     res.status(500).json({ error: errorMessage });
+  }
+});
+
+/** AI PDF Data Reconstruction */
+app.post('/api/import/pdf', async (req, res) => {
+  const { text } = req.body;
+  const apiKey = process.env.GEMINI_API_KEY;
+
+  if (!apiKey) return res.status(400).json({ error: 'Gemini API key is missing.' });
+  if (!text) return res.status(400).json({ error: 'No text provided.' });
+
+  try {
+    const genAI = new GoogleGenerativeAI(apiKey);
+    // Using gemini-1.5-flash for faster response and good document parsing
+    const model = genAI.getGenerativeModel({ model: "gemini-3-flash-preview" });
+
+    const prompt = `
+      You are an elite Document Reconstruction Expert. Your task is to take raw, messy text extracted from a PDF and transform it into a professional, clean, semantic HTML document. 
+
+      RAW TEXT TO PROCESS:
+      ${text}
+
+      INSTRUCTIONS:
+      1. CRITICAL: Identify the document structure: Use <h1> for the main title, <h2> for secondary headings, etc.
+      2. CLEANUP: Merge broken lines into proper paragraphs (<p>).
+      3. LISTS: Identify bullet points or numbered lists and use <ul>/<li> or <ol>/<li>.
+      4. TABLES: If you detect tabular data, reconstruct it using standard <table>, <thead>, <tbody>, <tr>, <td>, and <th> tags.
+      5. FORMATTING: Use <strong> for emphasis where appropriate.
+      6. REMOVAL: Strip out page numbers, redundant header/footer repetitions, or artifacts.
+      7. OUTPUT: Return ONLY the HTML as a string. Do NOT include markdown blocks (\`\`\`html) or any conversational text.
+    `;
+
+    const result = await model.generateContent(prompt);
+    const resultResponse = await result.response;
+    let html = resultResponse.text().trim();
+
+    // Secondary cleanup just in case
+    html = html.replace(/^```html\n?/, '').replace(/\n?```$/, '');
+
+    res.json({ html });
+  } catch (error) {
+    console.error('AI Import Error:', error);
+    res.status(500).json({ error: 'Failed to reconstruct document structure.' });
   }
 });
 ;
