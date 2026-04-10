@@ -150,7 +150,7 @@ app.post('/api/export/pdf', async (req, res) => {
 // ---- Email Invitation System ----
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp.zoho.in',
+  host: 'smtp.zoho.com',
   port: 465,
   secure: true,
   auth: {
