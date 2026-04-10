@@ -199,11 +199,12 @@ app.post('/api/invite', async (req, res) => {
                 <tr>
                   <td align="center" style="padding: 40px; background-color: #0f172a;">
                     <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); width: 56px; height: 56px; border-radius: 16px; display: inline-block; margin-bottom: 15px; box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
-                      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="padding: 14px; box-sizing: border-box;">
-                        <polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>
+                      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="padding: 14px; box-sizing: border-box;">
+                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
                       </svg>
                     </div>
                     <h1 style="color: #ffffff; margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -1px; font-family: sans-serif;">CollabDocs // Code</h1>
+
                   </td>
                 </tr>
                 <!-- Body -->
@@ -229,8 +230,7 @@ app.post('/api/invite', async (req, res) => {
                 <tr>
                   <td style="padding: 30px 50px; background-color: #0f172a; border-top: 1px solid #334155; text-align: center;">
                     <p style="color: #475569; font-size: 11px; margin: 0; font-family: monospace;">
-                      STATUS: ENCRYPTED // PORT: 443 <br>
-                      &copy; 2024 CollabDocs // The Developer Workspace.
+                      &copy; 2024 CollabDocs The Developer Workspace.
                     </p>
                   </td>
                 </tr>
@@ -327,7 +327,91 @@ app.post('/api/invite', async (req, res) => {
 });
 
 
+// ---- Universal Code Runner ----
+
+const CODAPI_SANDBOX_MAP = {
+  'javascript': 'javascript',
+  'typescript': 'typescript',
+  'python': 'python',
+  'java': 'java',
+  'cpp': 'cpp',
+};
+
+// Simple In-Memory Rate Limiting
+const executionRateLimit = new Map();
+const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
+const MAX_REQUESTS_PER_WINDOW = 5;
+
+app.post('/api/execute', async (req, res) => {
+  const ip = req.ip || req.headers['x-forwarded-for'] || 'unknown';
+  const now = Date.now();
+  
+  // Clean up old entries
+  if (executionRateLimit.has(ip)) {
+    const data = executionRateLimit.get(ip);
+    if (now - data.startTime > RATE_LIMIT_WINDOW) {
+      executionRateLimit.set(ip, { count: 1, startTime: now });
+    } else if (data.count >= MAX_REQUESTS_PER_WINDOW) {
+      return res.status(429).json({ 
+        error: 'Too many executions. Please Wait a minute to preserve our trial limits.' 
+      });
+    } else {
+      data.count++;
+    }
+  } else {
+    executionRateLimit.set(ip, { count: 1, startTime: now });
+  }
+
+  const { language, code } = req.body;
+
+
+  if (!language || !code) {
+    return res.status(400).json({ error: 'Language and code are required' });
+  }
+
+  const sandbox = CODAPI_SANDBOX_MAP[language];
+  if (!sandbox) {
+    return res.status(400).json({ error: `Language '${language}' is not supported yet.` });
+  }
+
+  try {
+    const response = await fetch('https://api.codapi.org/v1/exec', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sandbox: sandbox,
+        command: "run",
+        files: {
+          "": code
+        }
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.message || 'Execution Engine Error');
+    }
+
+    // Standardize the response for the CollabDocs frontend
+    res.json({
+      stdout: data.stdout || '',
+      stderr: data.stderr || '',
+      output: (data.stdout || '') + (data.stderr || ''),
+      code: data.exit_code,
+      version: 'Codapi Sandbox'
+    });
+
+  } catch (error) {
+    console.error('Execution Error:', error);
+    res.status(500).json({ error: 'Failed to execute code. Please try again later.' });
+  }
+});
+
+
+
 // ---- Metadata Routes ----
+
 
 app.get('/api/health', (req, res) => {
   res.json({
