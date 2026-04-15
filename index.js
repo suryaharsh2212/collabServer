@@ -4,7 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const puppeteer = require('puppeteer');
-const nodemailer = require('nodemailer');
+const { google } = require('googleapis');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 require('dotenv').config();
@@ -149,24 +149,27 @@ app.post('/api/export/pdf', async (req, res) => {
 
 // ---- Email Invitation System ----
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.zoho.in',
-  port: 465,
-  secure: true,
-  auth: {
-    user: process.env.ZOHO_USER,
-    pass: process.env.ZOHO_PASS,
-  },
-});
+// ---- Gmail API Setup ----
 
-// Verify connection configuration on startup
-transporter.verify(function (error, success) {
-  if (error) {
-    console.error('SMTP Connection Error:', error);
-  } else {
-    console.log('Server is ready to send invitations');
-  }
-});
+const oAuth2Client = new google.auth.OAuth2(
+  process.env.GMAIL_CLIENT_ID,
+  process.env.GMAIL_CLIENT_SECRET,
+  'https://developers.google.com/oauthplayground'
+);
+
+oAuth2Client.setCredentials({ refresh_token: process.env.GMAIL_REFRESH_TOKEN });
+
+const gmail = google.gmail({ version: 'v1', auth: oAuth2Client });
+console.log('Gmail API is ready to send invitations');
+
+/** Encode email message to Base64 (URL safe) */
+function encodeMessage(message) {
+  return Buffer.from(message)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
 
 
 app.post('/api/invite', async (req, res) => {
@@ -177,12 +180,8 @@ app.post('/api/invite', async (req, res) => {
     return res.status(400).json({ error: 'Email and invite link are required' });
   }
 
-  const mailOptions = {
-    from: `"CollabDocs" <${process.env.ZOHO_USER}>`,
-    to: email,
-    subject: `${senderName || 'A colleague'} invited you to ${isCode ? 'code' : 'collaborate'}: ${docTitle || 'Untitled Session'}`,
-    text: `Hello! ${senderName || 'A colleague'} has invited you to ${isCode ? 'code live' : 'collaborate'} on "${docTitle || 'Untitled Session'}" at CollabDocs. Use this link to join the session: ${inviteLink}`,
-    html: isCode ? `
+  const subject = `${senderName || 'A colleague'} invited you to ${isCode ? 'code' : 'collaborate'}: ${docTitle || 'Untitled Session'}`;
+  const htmlBody = isCode ? `
       <!DOCTYPE html>
       <html>
       <head>
@@ -311,18 +310,35 @@ app.post('/api/invite', async (req, res) => {
         </table>
       </body>
       </html>
-    `,
-  };
+    `;
 
 
 
+
+  const rawMessage = [
+    `From: "CollabDocs (No-Reply)" <${process.env.GMAIL_USER}>`,
+    `To: ${email}`,
+    `Subject: ${subject}`,
+    'Content-Type: text/html; charset=utf-8',
+    'MIME-Version: 1.0',
+    '',
+    htmlBody,
+  ].join('\n');
 
   try {
-    await transporter.sendMail(mailOptions);
-    res.json({ success: true, message: 'Invitation sent successfully' });
+    const encodedMessage = encodeMessage(rawMessage);
+
+    await gmail.users.messages.send({
+      userId: 'me',
+      requestBody: {
+        raw: encodedMessage,
+      },
+    });
+
+    res.json({ success: true, message: 'Invitation sent successfully via Gmail API' });
   } catch (error) {
     console.error('Email send error:', error);
-    res.status(500).json({ error: 'Failed to send invitation. Please check configuration.' });
+    res.status(500).json({ error: 'Failed to send invitation. Please check Gmail API configuration.' });
   }
 });
 
